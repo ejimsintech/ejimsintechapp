@@ -507,122 +507,165 @@ new MutationObserver(function(){setTimeout(Reflect,120);}).observe(document.body
 </style>
 
 
-<!-- FIREBASE FINAL - SIMPLE PROMPT LOGIN -->
+<!-- LIVE SYNC ADMIN -> ALL USERS INSTANT - WIRED TO EXISTING LOGIN -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+#live-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9999999;background:#0f0;color:#000;padding:10px 18px;border-radius:999px;font-size:12px;font-weight:700;display:none;box-shadow:0 10px 30px rgba(0,0,0,0.5)}
+</style>
+<div id="live-toast">🔴 LIVE UPDATE from Admin - Firebase Cloud</div>
 <script>
 (function(){
-  const config = {
-    apiKey: "AIzaSyCw9bD32_ZxJieIiJ_RD7nXRdP9UuLi7fU",
-    authDomain: "ejimsintech-a76f2.firebaseapp.com",
-    projectId: "ejimsintech-a76f2",
-    storageBucket: "ejimsintech-a76f2.firebasestorage.app",
-    messagingSenderId: "474876203486",
-    appId: "1:474876203486:web:463db35a6ce0d9e22a4d4f"
-  };
-  firebase.initializeApp(config);
-  const auth = firebase.auth();
-  const db = firebase.firestore();
+  const cfg={apiKey:"AIzaSyCw9bD32_ZxJieIiJ_RD7nXRdP9UuLi7fU",authDomain:"ejimsintech-a76f2.firebaseapp.com",projectId:"ejimsintech-a76f2",storageBucket:"ejimsintech-a76f2.firebasestorage.app",messagingSenderId:"474876203486",appId:"1:474876203486:web:463db35a6ce0d9e22a4d4f"};
+  firebase.initializeApp(cfg);
+  const db=firebase.firestore();
+  const API_KEY=cfg.apiKey;
+  const origSet=localStorage.setItem.bind(localStorage);
+  const origGet=localStorage.getItem.bind(localStorage);
 
-  function mkBar(){
-    if(document.getElementById("fb-bar")) return;
-    const bar = document.createElement("div");
-    bar.id="fb-bar";
-    bar.style.cssText="position:fixed;top:0;left:0;right:0;z-index:99999999;background:#111;border-bottom:2px solid #0f0;padding:10px;display:flex;justify-content:space-between;align-items:center;font-family:sans-serif;";
-    bar.innerHTML='<div style="color:#fff;font-size:13px;"><span style="background:#fff;color:#000;padding:2px 7px;border-radius:5px;font-weight:bold;">E</span> <span id="fb-status">Not logged in</span> <span id="fb-dot" style="display:inline-block;width:10px;height:10px;background:red;border-radius:50%;margin-left:5px;"></span></div><div><button id="fb-login" style="padding:8px 14px;border-radius:20px;border:0;background:#fff;color:#000;font-weight:bold;">LOGIN</button><button id="fb-logout" style="padding:8px 14px;border-radius:20px;border:0;background:#333;color:#fff;display:none;">LOGOUT</button></div>';
-    document.body.prepend(bar);
-    document.body.style.paddingTop="50px";
-    document.getElementById("fb-login").onclick = doLogin;
-    document.getElementById("fb-logout").onclick = ()=>auth.signOut();
+  let lastCloudHash="";
+  let isAdmin=false;
+
+  function showToast(msg){
+    const t=document.getElementById("live-toast");
+    t.textContent=msg;
+    t.style.display="block";
+    setTimeout(()=>t.style.display="none", 4000);
   }
-  mkBar();
 
-  async function doLogin(){
-    const email = prompt("Enter Email (ejimsintech@gmail.com):");
-    if(!email) return;
-    const pass = prompt("Enter Password (12345678):");
-    if(!pass) return;
+  // Detect admin
+  function checkAdmin(){
     try{
-      await auth.signInWithEmailAndPassword(email.trim(), pass.trim());
-      alert("Logged in! "+email);
-    }catch(e){
-      if(e.code==="auth/user-not-found" || e.code==="auth/invalid-credential"){
-        if(confirm("User not found. Create account with this email?")){
-          try{
-            await auth.createUserWithEmailAndPassword(email.trim(), pass.trim());
-            alert("Account created & logged in!");
-          }catch(err){ alert(err.message); }
-        }
-      }else{
-        alert("Login error: "+e.message);
+      const cur=origGet("ejim_currentUser")||origGet("ejim_userAuth")||origGet("ejim_admin");
+      if(cur){
+        const d=JSON.parse(cur);
+        isAdmin = (d.role==="admin" || d.isAdmin || (d.email&&d.email.toLowerCase()==="ejimsintech@gmail.com"));
       }
-    }
+    }catch{}
   }
 
-  let unsub=null;
-  auth.onAuthStateChanged((user)=>{
-    const s=document.getElementById("fb-status");
-    const l=document.getElementById("fb-login");
-    const o=document.getElementById("fb-logout");
-    const d=document.getElementById("fb-dot");
-    if(user){
-      if(s) s.textContent="Logged: "+user.email;
-      if(l) l.style.display="none";
-      if(o) o.style.display="block";
-      if(d) d.style.background="#0f0";
-      if(unsub) unsub();
-      unsub=db.collection("settings").doc(user.uid).onSnapshot(snap=>{
-        if(snap.exists){
-          const data=snap.data();
-          localStorage.setItem("ejim_siteSettings", JSON.stringify({moniepointNumber:data.moniepointNumber,firstBankNumber:data.firstBankNumber,accountName:data.accountName,phoneNumber:data.phoneNumber,phoneRaw:data.phoneRaw,whatsappNumber:data.whatsappNumber,whatsappDisplay:data.whatsappDisplay,email:data.email,sliderImages:data.sliderImages||[]}));
-          console.log("Live Sync update received");
-        }else{
-          const local=localStorage.getItem("ejim_siteSettings");
-          if(local){
-            try{ const j=JSON.parse(local); db.collection("settings").doc(user.uid).set({...j, userId:user.uid, updatedAt: firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); }catch(e){}
-          }
+  // Override localStorage to sync to Firebase
+  localStorage.setItem=function(k,v){
+    origSet(k,v);
+    try{
+      if(k==="ejim_siteSettings"){
+        const obj=JSON.parse(v);
+        db.collection("settings").doc("global").set({...obj, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: origGet("ejim_email")||"admin"}, {merge:true});
+        console.log("Admin saved to Firebase global - all users will sync");
+      }
+      if(k==="ejim_currentUser"||k==="ejim_userAuth"){
+        const data=JSON.parse(v);
+        if(data.email){
+          const id=data.email.toLowerCase().replace(/[^a-z0-9]/g,"_");
+          db.collection("ejim_users").doc(id).set({...data, lastLogin: firebase.firestore.FieldValue.serverTimestamp(), crossDevice:true}, {merge:true});
+          // Create Firebase Auth for cross-device
+          (async()=>{
+            try{
+              const pass=data.password||"12345678";
+              let res=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:data.email, password:pass, returnSecureToken:true})});
+              let jd=await res.json();
+              if(jd.error&&jd.error.message==="EMAIL_NOT_FOUND"){
+                res=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:data.email, password:pass, returnSecureToken:true})});
+                jd=await res.json();
+              }
+              if(jd.localId){ origSet("ejim_uid", jd.localId); origSet("ejim_email", jd.email); }
+            }catch(e){}
+          })();
         }
-      });
-    }else{
-      if(s) s.textContent="Not logged in - Tap LOGIN";
-      if(l) l.style.display="block";
-      if(o) o.style.display="none";
-      if(d) d.style.background="red";
-      if(unsub){ unsub(); unsub=null; }
-    }
-  });
-
-  window.saveToCloud = async function(o){
-    const u=auth.currentUser;
-    if(!u){ localStorage.setItem("ejim_siteSettings", JSON.stringify(o)); return; }
-    try{ await db.collection("settings").doc(u.uid).set({...o, userId:u.uid, email:u.email, updatedAt: firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); }catch(e){ localStorage.setItem("ejim_siteSettings", JSON.stringify(o)); }
+      }
+      if(k==="ejim_admin"||k==="ejim_admin_pass"||k==="ejim_adminUsers"){
+        db.collection("ejim_config").doc(k).set({data:v, updatedAt: firebase.firestore.FieldValue.serverTimestamp()}, {merge:true});
+      }
+    }catch(e){}
   };
 
-  setTimeout(()=>{
-    const btn=document.getElementById("sc-save");
-    if(btn && !btn.dataset.fb){
-      btn.dataset.fb="1";
-      btn.addEventListener("click", ()=>{
-        setTimeout(async()=>{
-          const o={
-            moniepointNumber:document.getElementById("sc-monie")?.value.trim()||"",
-            firstBankNumber:document.getElementById("sc-first")?.value.trim()||"",
-            accountName:document.getElementById("sc-name")?.value.trim()||"",
-            phoneNumber:document.getElementById("sc-phone")?.value.trim()||"",
-            phoneRaw:document.getElementById("sc-praw")?.value.replace(/[^0-9]/g,"")||"",
-            whatsappNumber:document.getElementById("sc-wa")?.value.replace(/[^0-9]/g,"")||"",
-            whatsappDisplay:document.getElementById("sc-wad")?.value.trim()||"",
-            email:document.getElementById("sc-email")?.value.trim()||"",
-            sliderImages:(document.getElementById("sc-slider")?.value.split("\n").map(s=>s.trim()).filter(Boolean))||[]
-          };
-          await window.saveToCloud(o);
-          const m=document.getElementById("sc-msg");
-          if(m){ m.textContent=auth.currentUser?"✅ SAVED TO CLOUD!":"Saved locally - Login to sync to cloud"; setTimeout(()=>m.textContent="",4000); }
-        },400);
+  // LIVE LISTENER: Admin edits -> All users instant
+  function startLiveSync(){
+    db.collection("settings").doc("global").onSnapshot(snap=>{
+      if(!snap.exists) return;
+      const data=snap.data();
+      const clean={moniepointNumber:data.moniepointNumber,firstBankNumber:data.firstBankNumber,accountName:data.accountName,phoneNumber:data.phoneNumber,phoneRaw:data.phoneRaw,whatsappNumber:data.whatsappNumber,whatsappDisplay:data.whatsappDisplay,email:data.email,sliderImages:data.sliderImages||[]};
+      const str=JSON.stringify(clean);
+      if(str===lastCloudHash) return;
+      lastCloudHash=str;
+      const current=origGet("ejim_siteSettings");
+      if(current!==str){
+        origSet("ejim_siteSettings", str);
+        console.log("🔴 LIVE SYNC from Admin Firebase -> All Users");
+        // Try to update UI without reload
+        try{
+          // Update visible elements
+          document.querySelectorAll("*").forEach(el=>{
+            const txt=el.textContent||"";
+            if(txt.includes("8121653025")||txt.includes("3116869480")){
+              // Will be updated on reload - force reload for users
+            }
+          });
+          // If not admin, show toast and reload to reflect new settings
+          checkAdmin();
+          if(!isAdmin){
+            showToast("🔴 Admin updated - Syncing new data...");
+            setTimeout(()=>location.reload(), 1500);
+          } else {
+            showToast("✅ Saved to Cloud - All users syncing...");
+          }
+        }catch(e){}
+      }
+    });
+
+    // Also sync admin users list live
+    db.collection("ejim_config").doc("ejim_adminUsers").onSnapshot(s=>{
+      if(s.exists){
+        const d=s.data().data;
+        if(d && d!==origGet("ejim_adminUsers")){
+          origSet("ejim_adminUsers", d);
+          console.log("Admin users synced cross-device");
+        }
+      }
+    });
+  }
+
+  // Hook existing login buttons to ensure Firebase Auth
+  function hookLogins(){
+    const check=()=>{
+      document.querySelectorAll("button").forEach(b=>{
+        if(!b.dataset.fbLive && /login|sign in|access/i.test(b.textContent||"")){
+          b.dataset.fbLive="1";
+          b.addEventListener("click", ()=>setTimeout(()=>{ checkAdmin(); }, 1000));
+        }
       });
+    };
+    setInterval(check, 2000);
+    check();
+  }
+
+  checkAdmin();
+  startLiveSync();
+  hookLogins();
+
+  // Initial load global if no local
+  (async()=>{
+    try{
+      const snap=await db.collection("settings").doc("global").get();
+      if(snap.exists && !origGet("ejim_siteSettings")){
+        const d=snap.data();
+        delete d.updatedAt; delete d.updatedBy;
+        origSet("ejim_siteSettings", JSON.stringify(d));
+        lastCloudHash=JSON.stringify(d);
+      } else if(snap.exists){
+        lastCloudHash=JSON.stringify({moniepointNumber:snap.data().moniepointNumber,firstBankNumber:snap.data().firstBankNumber,accountName:snap.data().accountName,phoneNumber:snap.data().phoneNumber,phoneRaw:snap.data().phoneRaw,whatsappNumber:snap.data().whatsappNumber,whatsappDisplay:snap.data().whatsappDisplay,email:snap.data().email,sliderImages:snap.data().sliderImages||[]});
+      }
+    }catch(e){}
+  })();
+
+  window.forceSyncFromCloud = async()=>{
+    const snap=await db.collection("settings").doc("global").get();
+    if(snap.exists){
+      const d=snap.data(); delete d.updatedAt; delete d.updatedBy;
+      origSet("ejim_siteSettings", JSON.stringify(d));
+      location.reload();
     }
-  },2000);
+  };
 })();
 </script>
 
